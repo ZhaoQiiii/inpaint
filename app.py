@@ -64,7 +64,7 @@ def get_masked_img(img, w, h):
 
 def get_inpainted_img(img, mask0, mask1, mask2):
     lama_config = "third_party/lama/configs/prediction/default.yaml"
-    lama_ckpt = "pretrained_models/big-lama"
+    # lama_ckpt = "pretrained_models/big-lama"
     device = "cuda" if torch.cuda.is_available() else "cpu"
     out = []
     for mask in [mask0, mask1, mask2]:
@@ -158,5 +158,5 @@ with gr.Blocks() as demo:
 
 
 if __name__ == "__main__":
-    demo.launch(debug=True)
+    demo.launch()
     
