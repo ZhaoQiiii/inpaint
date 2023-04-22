@@ -24,7 +24,7 @@ def get_sam_feat(img):
     model['sam'].set_image(img)
     return
 
-
+ 
 def get_masked_img(img, w, h):
     point_coords = [w, h]
     point_labels = [1]
