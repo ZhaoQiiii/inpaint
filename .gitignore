@@ -10,6 +10,3 @@ __pycache__/
 
 # tmp
 ~*
-
-# third_party git
-third_party/**.git
