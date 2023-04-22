@@ -160,5 +160,6 @@ with gr.Blocks() as demo:
 
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.queue(concurrency_count=20, max_size=25)
+    demo.launch(max_threads=40)
     
