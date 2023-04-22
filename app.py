@@ -19,18 +19,34 @@ def mkstemp(suffix, dir=None):
     return Path(path)
 
 
-# def get_sam_feat(img):
-#     # predictor.set_image(img)
-#     model['sam'].set_image(img)
-#     return
+def get_sam_feat(img):
+    # predictor.set_image(img)
+    model['sam'].set_image(img)
+    features = model['sam'].features 
+    orig_h = model['sam'].orig_h 
+    orig_w = model['sam'].orig_w 
+    input_h = model['sam'].input_h 
+    input_w = model['sam'].input_w 
+    return features, orig_h, orig_w, input_h, input_w
 
  
-def get_masked_img(img, w, h):
+def get_masked_img(img, w, h, features, orig_h, orig_w, input_h, input_w):
     point_coords = [w, h]
     point_labels = [1]
     dilate_kernel_size = 15
 
-    model['sam'].set_image(img)
+    # model['sam'].is_image_set = False
+    model['sam'].features = features
+    model['sam'].orig_h = orig_h
+    model['sam'].orig_w = orig_w
+    model['sam'].input_h = input_h
+    model['sam'].input_w = input_w
+    # model['sam'].image_embedding = image_embedding
+    # model['sam'].original_size = original_size
+    # model['sam'].input_size = input_size
+    # model['sam'].is_image_set = True
+    
+    # model['sam'].set_image(img)
     # masks, _, _ = predictor.predict(
     masks, _, _ = model['sam'].predict(
         point_coords=np.array([point_coords]),
@@ -98,6 +114,12 @@ model['lama'] = build_lama_model(lama_config, lama_ckpt, device=device)
 
 
 with gr.Blocks() as demo:
+    features = gr.State(None)
+    orig_h = gr.State(None)
+    orig_w = gr.State(None)
+    input_h = gr.State(None)
+    input_w = gr.State(None)
+
     with gr.Row():
         img = gr.Image(label="Image")
         # img_pointed = gr.Image(label='Pointed Image')
@@ -146,9 +168,11 @@ with gr.Blocks() as demo:
     #     []
     # )
     # img.change(get_sam_feat, [img], [])
+    img.upload(get_sam_feat, [img], [features, orig_h, orig_w, input_h, input_w])
+
     sam_mask.click(
         get_masked_img,
-        [img, w, h],
+        [img, w, h, features, orig_h, orig_w, input_h, input_w],
         [img_with_mask_0, img_with_mask_1, img_with_mask_2, mask_0, mask_1, mask_2]
     )
 
