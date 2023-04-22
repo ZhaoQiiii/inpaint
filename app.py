@@ -71,7 +71,7 @@ def get_inpainted_img(img, mask0, mask1, mask2):
         if len(mask.shape)==3:
             mask = mask[:,:,0]
         img_inpainted = inpaint_img_with_builded_lama(
-            model_lama, img, mask, lama_config, device=device)
+            model['lama'], img, mask, lama_config, device=device)
         out.append(img_inpainted)
     return out
 
@@ -104,7 +104,7 @@ with gr.Blocks() as demo:
             with gr.Row():
                 w = gr.Number(label="Point Coordinate W")
                 h = gr.Number(label="Point Coordinate H")
-            sam_feat = gr.Button("Generate Features Using SAM")
+            # sam_feat = gr.Button("Prepare for Segmentation")
             sam_mask = gr.Button("Predict Mask Using SAM")
             lama = gr.Button("Inpaint Image Using LaMA")
 
@@ -138,11 +138,12 @@ with gr.Blocks() as demo:
         return evt.index[0], evt.index[1], fig
 
     img.select(get_select_coords, [img], [w, h, img_pointed])
-    sam_feat.click(
-        get_sam_feat,
-        [img],
-        []
-    )
+    # sam_feat.click(
+    #     get_sam_feat,
+    #     [img],
+    #     []
+    # )
+    img.change(get_sam_feat, [img], [])
     sam_mask.click(
         get_masked_img,
         [img, w, h],
