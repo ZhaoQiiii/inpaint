@@ -19,16 +19,18 @@ def mkstemp(suffix, dir=None):
     return Path(path)
 
 
-def get_sam_feat(img):
-    # predictor.set_image(img)
-    model['sam'].set_image(img)
-    return
+# def get_sam_feat(img):
+#     # predictor.set_image(img)
+#     model['sam'].set_image(img)
+#     return
 
  
 def get_masked_img(img, w, h):
     point_coords = [w, h]
     point_labels = [1]
     dilate_kernel_size = 15
+
+    model['sam'].set_image(img)
     # masks, _, _ = predictor.predict(
     masks, _, _ = model['sam'].predict(
         point_coords=np.array([point_coords]),
@@ -143,7 +145,7 @@ with gr.Blocks() as demo:
     #     [img],
     #     []
     # )
-    img.change(get_sam_feat, [img], [])
+    # img.change(get_sam_feat, [img], [])
     sam_mask.click(
         get_masked_img,
         [img, w, h],
