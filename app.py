@@ -13,6 +13,7 @@ from utils import load_img_to_array, save_array_to_img, dilate_mask, \
 from PIL import Image
 from segment_anything import SamPredictor, sam_model_registry
 
+
 def mkstemp(suffix, dir=None):
     fd, path = tempfile.mkstemp(suffix=f"{suffix}", dir=dir)
     os.close(fd)
@@ -22,11 +23,13 @@ def mkstemp(suffix, dir=None):
 def get_sam_feat(img):
     # predictor.set_image(img)
     model['sam'].set_image(img)
+    # self.is_image_set = False
     features = model['sam'].features 
     orig_h = model['sam'].orig_h 
     orig_w = model['sam'].orig_w 
     input_h = model['sam'].input_h 
     input_w = model['sam'].input_w 
+    model['sam'].reset_image()
     return features, orig_h, orig_w, input_h, input_w
 
  
@@ -36,6 +39,7 @@ def get_masked_img(img, w, h, features, orig_h, orig_w, input_h, input_w):
     dilate_kernel_size = 15
 
     # model['sam'].is_image_set = False
+    model['sam'].is_image_set = True
     model['sam'].features = features
     model['sam'].orig_h = orig_h
     model['sam'].orig_w = orig_w
@@ -122,7 +126,6 @@ with gr.Blocks() as demo:
 
     with gr.Row():
         img = gr.Image(label="Image")
-        # img_pointed = gr.Image(label='Pointed Image')
         img_pointed = gr.Plot(label='Pointed Image')
         with gr.Column():
             with gr.Row():
@@ -131,6 +134,7 @@ with gr.Blocks() as demo:
             # sam_feat = gr.Button("Prepare for Segmentation")
             sam_mask = gr.Button("Predict Mask Using SAM")
             lama = gr.Button("Inpaint Image Using LaMA")
+            # clear_button_image = gr.Button(value="Clear Image", interactive=True)
 
     # todo: maybe we can delete this row, for it's unnecessary to show the original mask for customers
     with gr.Row():
@@ -182,6 +186,13 @@ with gr.Blocks() as demo:
         [img_rm_with_mask_0, img_rm_with_mask_1, img_rm_with_mask_2]
     )
 
+    # clear_button_image.click(
+    #     lambda: ([], [], [], []),
+    #     [],
+    #     [img, img_pointed, w, h],
+    #     queue=False,
+    #     show_progress=False
+    # )
 
 if __name__ == "__main__":
     # demo.queue(concurrency_count=4, max_size=25)
