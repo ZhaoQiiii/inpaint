@@ -1,19 +1,38 @@
+import os
+import sys
+# sys.path.append(os.path.abspath(os.path.dirname(os.getcwd())))
+# os.chdir("../")
 import gradio as gr
 import numpy as np
 from pathlib import Path
 from matplotlib import pyplot as plt
 import torch
 import tempfile
-import os
-from omegaconf import OmegaConf
-from sam_segment import predict_masks_with_sam
 from lama_inpaint import inpaint_img_with_lama, build_lama_model, inpaint_img_with_builded_lama
 from utils import load_img_to_array, save_array_to_img, dilate_mask, \
     show_mask, show_points
 from PIL import Image
+sys.path.insert(0, str(Path(__file__).resolve().parent / "third_party" / "segment-anything"))
 from segment_anything import SamPredictor, sam_model_registry
+import argparse
 
-
+def setup_args(parser):
+    parser.add_argument(
+        "--lama_config", type=str,
+        default="./third_party/lama/configs/prediction/default.yaml",
+        help="The path to the config file of lama model. "
+             "Default: the config of big-lama",
+    )
+    parser.add_argument(
+        "--lama_ckpt", type=str,
+        default="pretrained_models/big-lama",
+        help="The path to the lama checkpoint.",
+    )
+    parser.add_argument(
+        "--sam_ckpt", type=str,
+        default="./pretrained_models/sam_vit_h_4b8939.pth",
+        help="The path to the SAM checkpoint to use for mask generation.",
+    )
 def mkstemp(suffix, dir=None):
     fd, path = tempfile.mkstemp(suffix=f"{suffix}", dir=dir)
     os.close(fd)
@@ -21,9 +40,7 @@ def mkstemp(suffix, dir=None):
 
 
 def get_sam_feat(img):
-    # predictor.set_image(img)
     model['sam'].set_image(img)
-    # self.is_image_set = False
     features = model['sam'].features 
     orig_h = model['sam'].orig_h 
     orig_w = model['sam'].orig_w 
@@ -33,24 +50,18 @@ def get_sam_feat(img):
     return features, orig_h, orig_w, input_h, input_w
 
  
-def get_masked_img(img, w, h, features, orig_h, orig_w, input_h, input_w):
+def get_masked_img(img, w, h, features, orig_h, orig_w, input_h, input_w, dilate_kernel_size):
     point_coords = [w, h]
     point_labels = [1]
-    dilate_kernel_size = 15
 
-    # model['sam'].is_image_set = False
     model['sam'].is_image_set = True
     model['sam'].features = features
     model['sam'].orig_h = orig_h
     model['sam'].orig_w = orig_w
     model['sam'].input_h = input_h
     model['sam'].input_w = input_w
-    # model['sam'].image_embedding = image_embedding
-    # model['sam'].original_size = original_size
-    # model['sam'].input_size = input_size
-    # model['sam'].is_image_set = True
-    
-    model['sam'].set_image(img)
+
+    # model['sam'].set_image(img) # todo : update here for accelerating
     masks, _, _ = model['sam'].predict(
         point_coords=np.array([point_coords]),
         point_labels=np.array(point_labels),
@@ -77,6 +88,7 @@ def get_masked_img(img, w, h, features, orig_h, orig_w, input_h, input_w):
         show_points(plt.gca(), [point_coords], point_labels,
                     size=(width*0.04)**2)
         show_mask(plt.gca(), mask, random_color=False)
+        plt.tight_layout()
         plt.savefig(tmp_p, bbox_inches='tight', pad_inches=0)
         figs.append(fig)
         plt.close()
@@ -84,8 +96,7 @@ def get_masked_img(img, w, h, features, orig_h, orig_w, input_h, input_w):
 
 
 def get_inpainted_img(img, mask0, mask1, mask2):
-    lama_config = "third_party/lama/configs/prediction/default.yaml"
-    # lama_ckpt = "pretrained_models/big-lama"
+    lama_config = args.lama_config
     device = "cuda" if torch.cuda.is_available() else "cpu"
     out = []
     for mask in [mask0, mask1, mask2]:
@@ -97,25 +108,27 @@ def get_inpainted_img(img, mask0, mask1, mask2):
     return out
 
 
-## build models
+# get args 
+parser = argparse.ArgumentParser()
+setup_args(parser)
+args = parser.parse_args(sys.argv[1:])
+# build models
 model = {}
 # build the sam model
 model_type="vit_h"
-ckpt_p="pretrained_models/sam_vit_h_4b8939.pth"
+ckpt_p=args.sam_ckpt
 model_sam = sam_model_registry[model_type](checkpoint=ckpt_p)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model_sam.to(device=device)
-# predictor = SamPredictor(model_sam)
 model['sam'] = SamPredictor(model_sam)
 
 # build the lama model
-lama_config = "third_party/lama/configs/prediction/default.yaml"
-lama_ckpt = "pretrained_models/big-lama"
+lama_config = args.lama_config
+lama_ckpt = args.lama_ckpt
 device = "cuda" if torch.cuda.is_available() else "cpu"
-# model_lama = build_lama_model(lama_config, lama_ckpt, device=device)
 model['lama'] = build_lama_model(lama_config, lama_ckpt, device=device)
 
-
+button_size = (100,50)
 with gr.Blocks() as demo:
     features = gr.State(None)
     orig_h = gr.State(None)
@@ -123,36 +136,59 @@ with gr.Blocks() as demo:
     input_h = gr.State(None)
     input_w = gr.State(None)
 
-    with gr.Row():
-        img = gr.Image(label="Image")
-        img_pointed = gr.Plot(label='Pointed Image')
-        with gr.Column():
+    with gr.Row().style(mobile_collapse=False, equal_height=True):
+        with gr.Column(variant="panel"):
+            with gr.Row():
+                gr.Markdown("## Input Image")
+            with gr.Row():
+                img = gr.Image(label="Input Image").style(height="200px")
+        with gr.Column(variant="panel"):
+            with gr.Row():
+                gr.Markdown("## Pointed Image")
+            with gr.Row():
+                img_pointed = gr.Plot(label='Pointed Image')
+        with gr.Column(variant="panel"):
+            with gr.Row():
+                gr.Markdown("## Control Panel")
             with gr.Row():
                 w = gr.Number(label="Point Coordinate W")
                 h = gr.Number(label="Point Coordinate H")
-            # sam_feat = gr.Button("Prepare for Segmentation")
-            sam_mask = gr.Button("Predict Mask Using SAM")
-            lama = gr.Button("Inpaint Image Using LaMA")
-            # clear_button_image = gr.Button(value="Clear Image", interactive=True)
+            dilate_kernel_size = gr.Slider(label="Dilate Kernel Size", minimum=0, maximum=100, step=1, value=15)
+            sam_mask = gr.Button("Predict Mask", variant="primary").style(full_width=True, size="sm")
+            lama = gr.Button("Inpaint Image", variant="primary").style(full_width=True, size="sm")
+            clear_button_image = gr.Button(value="Reset", label="Reset", variant="secondary").style(full_width=True, size="sm")
 
     # todo: maybe we can delete this row, for it's unnecessary to show the original mask for customers
-    with gr.Row():
-        mask_0 = gr.outputs.Image(type="numpy", label="Segmentation Mask 0")
-        mask_1 = gr.outputs.Image(type="numpy", label="Segmentation Mask 1")
-        mask_2 = gr.outputs.Image(type="numpy", label="Segmentation Mask 2")
+    with gr.Row(variant="panel"):
+        with gr.Column():
+            with gr.Row():
+                gr.Markdown("## Segmentation Mask")
+            with gr.Row():
+                mask_0 = gr.outputs.Image(type="numpy", label="Segmentation Mask 0").style(height="200px")
+                mask_1 = gr.outputs.Image(type="numpy", label="Segmentation Mask 1").style(height="200px")
+                mask_2 = gr.outputs.Image(type="numpy", label="Segmentation Mask 2").style(height="200px")
 
-    with gr.Row():
-        img_with_mask_0 = gr.Plot(label="Image with Segmentation Mask 0")
-        img_with_mask_1 = gr.Plot(label="Image with Segmentation Mask 1")
-        img_with_mask_2 = gr.Plot(label="Image with Segmentation Mask 2")
+    with gr.Row(variant="panel"):
+        with gr.Column():
+            with gr.Row():
+                gr.Markdown("## Image with Mask")
+            with gr.Row():
+                img_with_mask_0 = gr.Plot(label="Image with Segmentation Mask 0")
+                img_with_mask_1 = gr.Plot(label="Image with Segmentation Mask 1")
+                img_with_mask_2 = gr.Plot(label="Image with Segmentation Mask 2")
 
-    with gr.Row():
-        img_rm_with_mask_0 = gr.outputs.Image(
-            type="numpy", label="Image Removed with Segmentation Mask 0")
-        img_rm_with_mask_1 = gr.outputs.Image(
-            type="numpy", label="Image Removed with Segmentation Mask 1")
-        img_rm_with_mask_2 = gr.outputs.Image(
-            type="numpy", label="Image Removed with Segmentation Mask 2")
+    with gr.Row(variant="panel"):
+        with gr.Column():
+            with gr.Row():
+                gr.Markdown("## Image Removed with Mask")
+            with gr.Row():
+                img_rm_with_mask_0 = gr.outputs.Image(
+                    type="numpy", label="Image Removed with Segmentation Mask 0").style(height="200px")
+                img_rm_with_mask_1 = gr.outputs.Image(
+                    type="numpy", label="Image Removed with Segmentation Mask 1").style(height="200px")
+                img_rm_with_mask_2 = gr.outputs.Image(
+                    type="numpy", label="Image Removed with Segmentation Mask 2").style(height="200px")
+
 
     def get_select_coords(img, evt: gr.SelectData):
         dpi = plt.rcParams['figure.dpi']
@@ -160,22 +196,17 @@ with gr.Blocks() as demo:
         fig = plt.figure(figsize=(width/dpi/0.77, height/dpi/0.77))
         plt.imshow(img)
         plt.axis('off')
+        plt.tight_layout()
         show_points(plt.gca(), [[evt.index[0], evt.index[1]]], [1],
                     size=(width*0.04)**2)
         return evt.index[0], evt.index[1], fig
 
     img.select(get_select_coords, [img], [w, h, img_pointed])
-    # sam_feat.click(
-    #     get_sam_feat,
-    #     [img],
-    #     []
-    # )
-    # img.change(get_sam_feat, [img], [])
     img.upload(get_sam_feat, [img], [features, orig_h, orig_w, input_h, input_w])
 
     sam_mask.click(
         get_masked_img,
-        [img, w, h, features, orig_h, orig_w, input_h, input_w],
+        [img, w, h, features, orig_h, orig_w, input_h, input_w, dilate_kernel_size],
         [img_with_mask_0, img_with_mask_1, img_with_mask_2, mask_0, mask_1, mask_2]
     )
 
@@ -185,16 +216,16 @@ with gr.Blocks() as demo:
         [img_rm_with_mask_0, img_rm_with_mask_1, img_rm_with_mask_2]
     )
 
-    # clear_button_image.click(
-    #     lambda: ([], [], [], []),
-    #     [],
-    #     [img, img_pointed, w, h],
-    #     queue=False,
-    #     show_progress=False
-    # )
+
+    def reset(*args):
+        return [None for _ in args]
+
+    clear_button_image.click(
+        reset,
+        [img, features, img_pointed, w, h, mask_0, mask_1, mask_2, img_with_mask_0, img_with_mask_1, img_with_mask_2, img_rm_with_mask_0, img_rm_with_mask_1, img_rm_with_mask_2],
+        [img, features, img_pointed, w, h, mask_0, mask_1, mask_2, img_with_mask_0, img_with_mask_1, img_with_mask_2, img_rm_with_mask_0, img_rm_with_mask_1, img_rm_with_mask_2]
+    )
 
 if __name__ == "__main__":
-    # demo.queue(concurrency_count=4, max_size=25)
-    # demo.launch(max_threads=8)
-    demo.launch()
+    demo.launch(share=True)
     
